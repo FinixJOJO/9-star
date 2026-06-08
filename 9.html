@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>九大行星 3D 動畫</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 15px;
+            border-radius: 8px;
+            pointer-events: none;
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        h1 {
+            margin: 0 0 5px 0;
+            font-size: 1.2rem;
+            color: #f39c12;
+        }
+        p {
+            margin: 0;
+            font-size: 0.9rem;
+            color: #ddd;
+        }
+    </style>
+    <!-- 引入 Three.js 核心庫 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- 引入軌道控制器 (OrbitControls) 允許滑鼠互動 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="info">
+        <h1>太陽系 九大行星 3D 動畫</h1>
+        <p>滑鼠左鍵：旋轉視角 | 滾輪：縮放 | 滑鼠右鍵：平移</p>
+    </div>
+
+    <script>
+        // 確保 DOM 載入完成後再開始動畫
+        window.onload = function () {
+            init();
+            animate();
+        };
+
+        let scene, camera, renderer, controls;
+        let sun;
+        let planets = [];
+        let earthSystem, moon;
+
+        // 定義行星資料 (包含半徑、距離、公轉速度、自轉速度、顏色等)
+        // 比例經過調整以利於在螢幕上觀賞，非真實比例
+        const planetData = [
+            { name: '水星', radius: 0.4, distance: 10, speed: 0.04, color: 0xa8a8a8 },
+            { name: '金星', radius: 0.9, distance: 15, speed: 0.015, color: 0xe6b800 },
+            { name: '地球', radius: 1, distance: 22, speed: 0.01, color: 0x2255ff, isEarth: true },
+            { name: '火星', radius: 0.5, distance: 28, speed: 0.008, color: 0xff3300 },
+            { name: '木星', radius: 2.5, distance: 40, speed: 0.002, color: 0xd2b48c },
+            { name: '土星', radius: 2, distance: 55, speed: 0.0009, color: 0xf5deb3, hasRing: true },
+            { name: '天王星', radius: 1.5, distance: 68, speed: 0.0004, color: 0x87ceeb },
+            { name: '海王星', radius: 1.4, distance: 80, speed: 0.0001, color: 0x00008b },
+            { name: '冥王星', radius: 0.3, distance: 92, speed: 0.00007, color: 0xdddddd } // 傳統九大行星
+        ];
+
+        function init() {
+            // 1. 建立場景
+            scene = new THREE.Scene();
+
+            // 2. 建立攝影機
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 50, 100);
+
+            // 3. 建立渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            document.body.appendChild(renderer.domElement);
+
+            // 4. 加入控制器 (OrbitControls)
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; // 增加滑動阻尼感
+            controls.dampingFactor = 0.05;
+
+            // 5. 建立燈光
+            // 環境光 (微弱的整體光照)
+            const ambientLight = new THREE.AmbientLight(0x333333);
+            scene.add(ambientLight);
+            
+            // 點光源 (代表太陽發出的光)
+            const pointLight = new THREE.PointLight(0xffffff, 3.5, 600); // 增強光源強度和照射距離
+            pointLight.position.set(0, 0, 0);
+            scene.add(pointLight);
+
+            // 6. 建立星空背景
+            createStars();
+
+            // 7. 建立太陽
+            const sunGeometry = new THREE.SphereGeometry(5, 64, 64); // 增加面數讓球體更圓滑
+            // 使用 Standard 材質並加上 emissive (自發光) 屬性來提升層次感
+            const sunMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0xffd700, 
+                emissive: 0xff8c00, 
+                emissiveIntensity: 0.9,
+                roughness: 0.2,
+                metalness: 0.1
+            });
+            sun = new THREE.Mesh(sunGeometry, sunMaterial);
+            scene.add(sun);
+
+            // 加入太陽光暈 (Glow 效果)
+            const glowGeometry = new THREE.SphereGeometry(6.2, 64, 64);
+            const glowMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffaa00,
+                transparent: true,
+                opacity: 0.25,
+                blending: THREE.AdditiveBlending // 加法混合，製造發光感
+            });
+            const sunGlow = new THREE.Mesh(glowGeometry, glowMaterial);
+            sun.add(sunGlow); // 將光暈綁定在太陽上
+
+            // 加入太陽標籤
+            const sunLabel = makeTextSprite('太陽');
+            sunLabel.position.set(0, 8, 0);
+            scene.add(sunLabel);
+
+            // 8. 建立行星與軌道
+            planetData.forEach((data) => {
+                // 建立軌道線
+                createOrbitLine(data.distance);
+
+                // 建立一個群組，用來處理公轉位移
+                const planetGroup = new THREE.Group();
+                scene.add(planetGroup);
+
+                // 加入中文名稱標籤
+                const labelSprite = makeTextSprite(data.name);
+                labelSprite.position.set(0, data.radius + 1.8, 0); // 放在星球上方
+                planetGroup.add(labelSprite);
+
+                let bodyMesh;
+
+                if (data.isEarth) {
+                    // 地球實體
+                    const earthGeo = new THREE.SphereGeometry(data.radius, 32, 32);
+                    const earthMat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.5 });
+                    bodyMesh = new THREE.Mesh(earthGeo, earthMat);
+                    planetGroup.add(bodyMesh);
+
+                    // 月球實體
+                    const moonGeo = new THREE.SphereGeometry(0.25, 16, 16);
+                    const moonMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 });
+                    moon = new THREE.Mesh(moonGeo, moonMat);
+                    // 將月球初始位置設在離地球一點距離的地方
+                    moon.position.set(2.5, 0, 0); 
+                    planetGroup.add(moon);
+
+                    // 將系統資料儲存起來以便動畫更新
+                    planets.push({
+                        group: planetGroup,   // 負責公轉的群組
+                        mesh: bodyMesh,       // 負責自轉的星球本體
+                        data: data,
+                        angle: Math.random() * Math.PI * 2, // 隨機初始角度
+                        moonAngle: 0
+                    });
+
+                } else {
+                    // 建立一般行星實體
+                    const geo = new THREE.SphereGeometry(data.radius, 32, 32);
+                    const mat = new THREE.MeshStandardMaterial({ color: data.color, roughness: 0.6 });
+                    bodyMesh = new THREE.Mesh(geo, mat);
+                    
+                    // 如果是土星，加上行星環
+                    if (data.hasRing) {
+                        const ringGeo = new THREE.RingGeometry(data.radius * 1.3, data.radius * 2.2, 32);
+                        // 雙面顯示材質，並允許透明度
+                        const ringMat = new THREE.MeshBasicMaterial({ 
+                            color: 0xd2b48c, 
+                            side: THREE.DoubleSide, 
+                            transparent: true, 
+                            opacity: 0.6 
+                        });
+                        const ring = new THREE.Mesh(ringGeo, ringMat);
+                        ring.rotation.x = Math.PI / 2 - 0.2; // 讓環有點傾斜
+                        bodyMesh.add(ring);
+                    }
+
+                    planetGroup.add(bodyMesh);
+                    planets.push({
+                        group: planetGroup,  // 負責公轉的群組
+                        mesh: bodyMesh,      // 負責自轉的星球本體
+                        data: data,
+                        angle: Math.random() * Math.PI * 2 // 隨機初始軌道角度
+                    });
+                }
+            });
+
+            // 監聽視窗大小改變
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        // 建立文字標籤 (Sprite) 的方法
+        function makeTextSprite(message) {
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('2d');
+            canvas.width = 256;
+            canvas.height = 128;
+            
+            context.font = "Bold 36px 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif";
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+            
+            // 加入黑色描邊，讓文字在星空中更清晰
+            context.lineWidth = 5;
+            context.strokeStyle = "rgba(0, 0, 0, 0.9)";
+            context.strokeText(message, canvas.width / 2, canvas.height / 2);
+            
+            // 填寫白色文字
+            context.fillStyle = "rgba(255, 255, 255, 1.0)";
+            context.fillText(message, canvas.width / 2, canvas.height / 2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            const spriteMaterial = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(spriteMaterial);
+            
+            // 調整標籤大小
+            sprite.scale.set(6, 3, 1);
+            return sprite;
+        }
+
+        // 建立軌道線條的方法
+        function createOrbitLine(radius) {
+            const curve = new THREE.EllipseCurve(
+                0,  0,            // ax, aY
+                radius, radius,   // xRadius, yRadius
+                0,  2 * Math.PI,  // aStartAngle, aEndAngle
+                false,            // aClockwise
+                0                 // aRotation
+            );
+
+            const points = curve.getPoints(128); // 增加點數讓軌道更平滑
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            
+            // 改用虛線材質，並設為白色
+            const material = new THREE.LineDashedMaterial({ 
+                color: 0xffffff, 
+                transparent: true, 
+                opacity: 0.4,
+                dashSize: 0.8, // 虛線長度
+                gapSize: 0.8   // 虛線間距
+            });
+
+            const ellipse = new THREE.Line(geometry, material);
+            ellipse.computeLineDistances(); // 虛線材質必須呼叫此方法計算距離才能正確顯示
+            ellipse.rotation.x = Math.PI / 2; // 躺平在 XZ 平面上
+            scene.add(ellipse);
+        }
+
+        // 建立背景星空的方法
+        function createStars() {
+            const starsGeometry = new THREE.BufferGeometry();
+            const starsCount = 2000;
+            const posArray = new Float32Array(starsCount * 3);
+
+            for (let i = 0; i < starsCount * 3; i++) {
+                // 將星星散佈在廣大的空間中
+                posArray[i] = (Math.random() - 0.5) * 400;
+            }
+
+            starsGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+            const starsMaterial = new THREE.PointsMaterial({
+                color: 0xffffff,
+                size: 0.5,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            const starMesh = new THREE.Points(starsGeometry, starsMaterial);
+            scene.add(starMesh);
+        }
+
+        // 處理視窗縮放
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // 動畫循環
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 太陽自轉
+            sun.rotation.y += 0.005;
+
+            // 更新所有行星的位置與自轉
+            planets.forEach(p => {
+                // 更新公轉角度
+                p.angle += p.data.speed;
+                
+                // 計算公轉的 X 與 Z 座標 (套用在 group 上，讓標籤也跟著位移)
+                p.group.position.x = Math.cos(p.angle) * p.data.distance;
+                p.group.position.z = Math.sin(p.angle) * p.data.distance;
+
+                // 行星自轉 (套用在 mesh 上，這樣標籤才不會跟著自轉)
+                p.mesh.rotation.y += 0.02;
+
+                // 特別處理地球系統的月球
+                if (p.data.isEarth) {
+                    // 月球繞地球公轉
+                    p.moonAngle += 0.05; 
+                    moon.position.x = Math.cos(p.moonAngle) * 2.5;
+                    moon.position.z = Math.sin(p.moonAngle) * 2.5;
+                    // 月球自轉
+                    moon.rotation.y += 0.01;
+                }
+            });
+
+            // 更新控制器狀態 (為阻尼效果)
+            controls.update();
+
+            // 渲染畫面
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
